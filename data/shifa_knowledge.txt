@@ -1,0 +1,56 @@
+Brand: Shifa
+Description: Shifa is a wellness and supplement brand.
+
+General rule:
+Shifa products are dietary supplements, not medications.
+They support a healthy lifestyle and do not replace medical advice.
+
+--------------------------------------------------
+Product: Slim Day
+Category: Weight management supplement
+Purpose: Supports daytime weight management routine
+Benefits:
+- supports appetite regulation
+- supports fat metabolism
+- supports weight management
+Usage:
+Take 2 capsules daily with water, preferably in the morning or before meals.
+
+--------------------------------------------------
+Product: Slim Night
+Category: Night support supplement
+Purpose: Supports nighttime routine in a weight management program
+Benefits:
+- supports sleep quality
+- supports relaxation
+- may help reduce night cravings
+Usage:
+Take 2 capsules 30 minutes before sleep with water.
+
+--------------------------------------------------
+Product: Slim Pack
+Category: Weight management pack
+Description:
+Slim Pack combines Slim Day and Slim Night for a day and night routine.
+
+--------------------------------------------------
+Product: Colon Detox
+Category: Digestive supplement
+Purpose: Supports digestion and intestinal comfort
+Benefits:
+- supports digestion
+- may reduce bloating
+- supports bowel comfort
+Usage:
+Take 1 to 2 capsules with water.
+
+--------------------------------------------------
+Product: Liver Detox
+Category: Detox supplement
+Purpose: Supports liver and digestion routine
+Benefits:
+- supports liver function
+- supports detox routine
+- supports digestion
+Usage:
+Take 2 capsules daily, preferably in the morning.

@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+*.pyc
+.env
+.streamlit/
+evaluation_results.csv
+*.csv
+test_supabase.py
+evaluate.py
+evaluate_recommendation_agent.py
+test_questions.csv
+evaluation_results.csv
+recommendation_test_results.csv
