@@ -2,7 +2,12 @@ import os
 from dotenv import load_dotenv
 from openai import OpenAI
 from ai_module.decision_engine import build_decision_output
-from ai_module.user_memory_db import get_user_memory, update_user_memory, log_chat_interaction
+from ai_module.user_memory_db import (
+    get_user_memory,
+    get_user_profile,
+    update_user_memory,
+    log_chat_interaction
+)
 from ai_module.product_db import (
     get_product_knowledge_dict,
     get_quantity_offers_dict,
@@ -81,9 +86,18 @@ SAFETY RULES:
 - Do not give medical diagnosis
 - Do not claim to cure diseases
 - Do not replace a doctor or dietitian
+
+- If the user has medical conditions, adapt advice safely.
+- Do not diagnose or prescribe treatment.
+- For diabetes, avoid recommending high-sugar meals or sugary drinks.
+- For hypertension, avoid recommending high-salt or highly processed foods.
+- For pregnancy, breastfeeding, chronic disease, or medication use, advise consulting a doctor or pharmacist before using supplements.
+
 PRODUCT BOUNDARY RULES:
 - You must NEVER mention or recommend products that are not موجودة في قاعدة معرفة Shifa
 - Do not invent names like Protein Powder, Weight Gainer, or any external supplement
+
+
 
 USAGE PRIORITY RULE:
 - If the user asks how to use a product, answer first with the exact usage instructions
@@ -464,8 +478,9 @@ User profile:
 - weight: {merged_profile.get('weight')}
 - height: {merged_profile.get('height')}
 - goals: {merged_profile.get('goals')}
+- medical_conditions: {merged_profile.get('medical_conditions')}
 - activity_info: {merged_profile.get('activity_info')}
-
+- sex: {merged_profile.get('sex')}
 Daily check-in memory:
 - health_interests: {merged_profile.get('health_interests')}
 - recurring_food_patterns: {merged_profile.get('recurring_food_patterns')}
@@ -482,6 +497,11 @@ def detect_product(question: str) -> str | None:
 
     if "slim day" in q:
         return "Slim Day"
+    if any(x in q for x in [
+        "colon detox", "colon", "constipation", "digest", "digestion", "li ynadhef lcolon", "الي ينظف القولون", "gaz", "nfekh"
+        "kerch", "bloating", "نفخة", "إمساك", "هضم", "كرش"
+    ]):
+        return "Colon Detox"
     if "slim night" in q:
         return "Slim Night"
     if any(x in q for x in [
@@ -489,11 +509,7 @@ def detect_product(question: str) -> str | None:
         "تخسيس", "نقص وزن", "naqs", "wazn", "نضعف", "كرش"
     ]):
         return "Slim Pack"
-    if any(x in q for x in [
-        "colon detox", "colon", "constipation", "digest", "digestion", "li ynadhef lcolon", "الي ينظف القولون", "gaz", "nfekh"
-        "kerch", "bloating", "نفخة", "إمساك", "هضم", "كرش"
-    ]):
-        return "Colon Detox"
+
 
     if any(x in q for x in [
         "liver detox", "liver", "kebda", "كبد", "detox", "سموم"
@@ -622,6 +638,17 @@ def is_implicit_reference(question: str) -> bool:
 def detect_intent(question: str) -> str:
     q = question.lower()
     product = detect_product(question)
+    if any(w in q for w in [
+        "نفخة", "غازات", "كرشي", "معدة", "هضم", "امساك", "إمساك",
+        "bloating", "gas", "constipation", "digestion", "nfekh", "gaz"
+    ]):
+        return "digestion_issue"
+
+    if any(w in q for w in [
+        "متقلق", "قلق", "stress", "stressed", "anxiety",
+        "مانجمش نرقد", "ما نرقدش", "نوم", "sleep", "insomnia"
+    ]):
+        return "stress_sleep_issue"
 
     if any(word in q for word in ["hi", "hello", "aslema", "slm", "salem", "bonjour"]):
         return "greeting"
@@ -696,6 +723,8 @@ def build_intent_instruction(intent: str) -> str:
         "product_benefits": "Explain product benefits based only on the provided product information.",
         "product_usage": "Explain briefly how to use the product in 1 to 2 sentences.",
         "product_recommendation": "Recommend the most relevant Shifa product naturally and explain briefly why it fits the user's goal.",
+        "digestion_issue": "Give digestion advice and recommend Colon Detox only if relevant.",
+        "stress_sleep_issue": "Give stress/sleep wellness advice and recommend Blood Detox only if relevant.",
         "brand_info": "Answer briefly about the brand using the brand information provided.",
         "delivery_info": "Answer only about delivery fees and delivery conditions using the provided offers. Do not invent delivery information.",
         "unknown": "Give a short, clear, safe, general answer without inventing facts.",
@@ -773,7 +802,11 @@ def recommend_shifa_product(question: str, merged_profile: dict | None = None) -
         "liver", "detox", "kebda", "كبد", "تنقية", "سموم"
     ]):
         return "Liver Detox", "هذا المنتج هو الأقرب لدعم الكبد والتنقية."
-
+    if any(w in q for w in [
+        "متقلق", "قلق", "stress", "stressed", "anxiety",
+        "مانجمش نرقد", "ما نرقدش", "نوم", "sleep", "insomnia"
+    ]):
+        return "Blood Detox", "هذا المنتج هو الأقرب لدعم التوازن، الدورة الدموية، والتعب المرتبط بالضغط اليومي."
     # weight loss / slimming
     if any(w in q for w in [
         "naqs", "wazn", "lose weight", "perdre du poids", "slim", "وزن", "تنحيف", "semna", "kerch", "nodh3ef", "سمنة", "graisse",
@@ -972,17 +1005,19 @@ def chatbot_response(question, user_profile=None, chat_history=None):
     user_profile = user_profile or {}
     user_id = user_profile.get("user_id", "demo_user")
     stored_memory = get_user_memory(user_id)
+    stored_profile = get_user_profile(user_id)
     product_db = get_product_knowledge_dict()
     quantity_offers_db = get_quantity_offers_dict()
     bundle_offers_db = get_bundle_offers()
     merged_profile = {
         "user_id": user_id,
-        "age": user_profile.get("age") or stored_memory.get("age"),
-        "weight": user_profile.get("weight") or stored_memory.get("weight"),
-        "height": user_profile.get("height") or stored_memory.get("height"),
-        "goals": user_profile.get("goals") or stored_memory.get("goals", []),
+        "age": user_profile.get("age") or stored_profile.get("age"),
+        "sex": user_profile.get("sex") or stored_profile.get("sex"),
+        "weight": user_profile.get("weight") or stored_profile.get("weight"),
+        "height": user_profile.get("height") or stored_profile.get("height"),
+        "goals": user_profile.get("goals") or stored_profile.get("goals", []),
+        "medical_conditions": user_profile.get("medical_conditions") or stored_profile.get("medical_conditions", []),
         "activity_info": user_profile.get("activity_info") or stored_memory.get("activity_info"),
-
     # Daily check-in memory
         "health_interests": stored_memory.get("health_interests", []),
         "recurring_food_patterns": stored_memory.get("recurring_food_patterns", []),
@@ -1237,6 +1272,9 @@ def chatbot_response(question, user_profile=None, chat_history=None):
     if any(w in q for w in ["constipation", "digest", "digestion", "colon", "bloating", "kerch", "نفخة", "إمساك", "هضم", "كرش"]):
         health_interests.append("digestion")
         notes.append("asked about digestion")
+    if any(w in q for w in ["متقلق", "قلق", "stress", "anxiety", "مانجمش نرقد", "ما نرقدش", "نوم", "sleep"]):
+        health_interests.append("stress_anxiety")
+        notes.append("asked about stress or sleep")
 
     if any(w in q for w in ["liver", "detox", "kebda", "كبد", "سموم"]):
         health_interests.append("detox")

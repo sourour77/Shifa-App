@@ -1,4 +1,5 @@
 from ai_module.supabase_client import supabase
+from datetime import datetime, timedelta
 
 
 def get_or_create_user(user_code: str):
@@ -53,6 +54,23 @@ def get_user_memory(user_code: str):
 
     return created.data[0]
 
+def get_recent_chat_history(user_code: str, days: int = 90, limit: int = 100):
+    from datetime import datetime, timedelta
+
+    user = get_or_create_user(user_code)
+    since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+
+    res = (
+        supabase.table("chat_interactions")
+        .select("*")
+        .eq("user_id", user["id"])
+        .gte("created_at", since)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+
+    return res.data or []
 
 def merge_unique(existing, new_items):
     existing = existing or []
@@ -112,11 +130,12 @@ def create_daily_checkin(user_code: str, data: dict):
         "user_id": user["id"],
         "mood": data.get("mood"),
         "notes": data.get("notes"),
+        "daily_steps": data.get("daily_steps", 0),
     }
 
     result = (
         supabase.table("daily_checkins")
-        .upsert(row, on_conflict="user_id,checkin_date")
+        .insert(row)
         .execute()
     )
 
@@ -144,14 +163,18 @@ def log_daily_activity(checkin_id: int, data: dict):
 
     supabase.table("daily_activity_logs").insert(row).execute()
 
-def get_recent_checkins(user_code: str, limit: int = 7):
+
+def get_recent_checkins(user_code: str, limit: int = 50):
     user = get_or_create_user(user_code)
+
+    since = (datetime.utcnow() - timedelta(days=7)).isoformat()
 
     checkins_res = (
         supabase.table("daily_checkins")
         .select("*")
         .eq("user_id", user["id"])
-        .order("checkin_date", desc=True)
+        .gte("created_at", since)
+        .order("created_at", desc=True)
         .limit(limit)
         .execute()
     )
@@ -211,6 +234,7 @@ def upsert_user_profile(user_code: str, profile_data: dict):
         "sex": profile_data.get("sex"),
         "goals": profile_data.get("goals", []),
         "language": profile_data.get("language", "ar"),
+        "medical_conditions": profile_data.get("medical_conditions", []),
     }
 
     if user.get("profile_id"):

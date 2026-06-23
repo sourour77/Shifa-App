@@ -57,25 +57,25 @@ Mood:
 {mood}
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "Return only valid JSON. No explanation."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0
-    )
-
-    content = response.choices[0].message.content.strip()
-
     try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Return only valid JSON. No explanation."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0
+        )
+
+        content = response.choices[0].message.content.strip()
         return json.loads(content)
+
     except Exception:
         return {
-            "food_patterns": [],
-            "activity_level_today": "unknown",
+            "food_patterns": detect_food_patterns(meals_today),
+            "activity_level_today": detect_activity_level(activity_today),
             "activity_duration_minutes": None,
-            "health_interests": [],
+            "health_interests": detect_health_interests(meals_today),
             "last_detected_issue": None,
             "meal_summary": meals_today,
             "activity_summary": activity_today,
@@ -244,6 +244,22 @@ def calculate_bmr(weight, height, age, sex):
 
     return None
 
+def get_activity_factor(activity_level: str):
+    factors = {
+        "low": 1.2,
+        "moderate": 1.375,
+        "high": 1.55,
+        "unknown": 1.2,
+    }
+    return factors.get(activity_level, 1.2)
+
+
+def calculate_tdee(bmr, activity_level):
+    if bmr is None:
+        return None
+
+    factor = get_activity_factor(activity_level)
+    return round(bmr * factor)
 
 def estimate_activity_calories(weight, duration_minutes, intensity):
     if not weight or not duration_minutes:
@@ -278,9 +294,12 @@ def structured_energy_calculation(user_profile, extracted):
         intensity=activity_level
     )
 
+    tdee = calculate_tdee(bmr, activity_level)
+
     return {
         "bmr": bmr,
-        "estimated_calories_burned": calories_burned_activity,
+        "tdee": tdee,
+        "estimated_activity_calories_burned": calories_burned_activity,
         "activity_duration_minutes": duration,
         "activity_intensity": activity_level,
     }
@@ -449,13 +468,31 @@ def build_daily_checkin_output(
         mood
     )
     
-    if structured_energy.get("estimated_calories_burned") is not None:
-        energy_estimation["estimated_calories_burned"] = structured_energy["estimated_calories_burned"]
+    bmr = structured_energy.get("bmr")
+    tdee = structured_energy.get("tdee")
+    activity_burned = structured_energy.get("estimated_activity_calories_burned") or 0
 
-    if energy_estimation.get("estimated_calories_in") is not None and energy_estimation.get("estimated_calories_burned") is not None:
+    if tdee is not None:
+        energy_estimation["estimated_calories_burned"] = tdee
+        energy_estimation["estimated_total_calories_burned"] = tdee
+        energy_estimation["estimated_bmr"] = bmr
+        energy_estimation["estimated_tdee"] = tdee
+        energy_estimation["estimated_activity_calories_burned"] = activity_burned
+
+    if (
+        energy_estimation.get("estimated_calories_in") is not None
+        and energy_estimation.get("estimated_calories_burned") is not None
+    ):
         net = energy_estimation["estimated_calories_in"] - energy_estimation["estimated_calories_burned"]
         energy_estimation["estimated_net_calories"] = net
         energy_estimation["estimated_weekly_weight_change_kg"] = round((net * 7) / 7700, 2)
+
+        if net > 200:
+            energy_estimation["weight_trend"] = "possible gain"
+        elif net < -200:
+            energy_estimation["weight_trend"] = "possible loss"
+        else:
+            energy_estimation["weight_trend"] = "stable"
 
     food_patterns = extracted.get("food_patterns", [])
     health_interests = extracted.get("health_interests", [])
@@ -464,36 +501,9 @@ def build_daily_checkin_output(
     meal_summary = extracted.get("meal_summary", meals_today)
     activity_summary = extracted.get("activity_summary", activity_today)
 
-    meal_feedback = []
-    activity_feedback = []
     product_hint = None
 
-    if "weight loss" in goals_text or "weightloss" in goals_text:
-        if "heavy_meals" in food_patterns:
-            meal_feedback.append("اليوم الماكلة فيها شوية ثقل، حاول غدوة تختار وجبات أخف.")
-        if "high_sugar" in food_patterns:
-            meal_feedback.append("حاول تنقص من السكريات والمشروبات الحلوة.")
-        if "protein_intake" not in food_patterns:
-            meal_feedback.append("زيد مصدر بروتين باش تشبع أكثر وتحافظ على طاقتك.")
-        if not meal_feedback:
-            meal_feedback.append("اختياراتك الغذائية باهية لهدف نقص الوزن.")
-
-    elif "muscle" in goals_text or "weight gain" in goals_text:
-        if "protein_intake" not in food_patterns:
-            meal_feedback.append("حاول تزيد بروتين: بيض، دجاج، تونة، حوت.")
-        meal_feedback.append("لزيادة الوزن أو العضلات، حاول تكون وجباتك منتظمة وكافية.")
-
-    else:
-        meal_feedback.append("حاول تحافظ على توازن: بروتين + خضرة + كمية معقولة كربوهيدرات.")
-
-    if activity_level_today == "low":
-        activity_feedback.append("نشاطك اليوم قليل، تنجم تبدأ بمشي 20 دقيقة.")
-    elif activity_level_today == "moderate":
-        activity_feedback.append("نشاطك اليوم باهي، حاول تحافظ على نفس النسق.")
-    elif activity_level_today == "high":
-        activity_feedback.append("نشاطك اليوم قوي، ركز على الماء والراحة.")
-    else:
-        activity_feedback.append("ما فهمتش بالضبط النشاط، أما حاول تتحرك شوية كل يوم.")
+    
 
     if "digestion" in health_interests:
         product_hint = "Colon Detox"
@@ -541,8 +551,7 @@ def build_daily_checkin_output(
         "food_patterns": food_patterns,
         "health_interests": health_interests,
         "activity_level_today": activity_level_today,
-        "meal_feedback": meal_feedback,
-        "activity_feedback": activity_feedback,
+      
         "product_hint": product_hint,
         "consistency_score": consistency_score,
         "energy_estimation": energy_estimation,
