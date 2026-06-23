@@ -1,4 +1,5 @@
 
+Please update the frontend profile form and AI integration.
 
 Profile setup fields:
 - name
